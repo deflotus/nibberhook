@@ -1,9 +1,9 @@
-if not isfolder'nibberhook' then
-    makefolder'nibberhook'
+local owner = "deflotus"
+local branch = "main"
+
+local function webImport(file)
+    return loadstring(game:HttpGetAsync(("https://raw.githubusercontent.com/%s/nibberhook/%s/%s.lua"):format(owner, branch, file)), file .. '.lua')()
 end
 
-if not isfolder'nibberhook/modules' then
-    makefolder'nibberhook/modules'
-end
-
-print(readfile'nibberhook/modules')
+local commands = webImport("commands")
+table.foreach(commands, print)
