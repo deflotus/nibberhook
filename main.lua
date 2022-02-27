@@ -19,8 +19,9 @@ local Services = setmetatable({}, {
 })
 
 local LocalPlayer = Services.Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
 
-local Commands = {}
+local Commands, CommandStorage = {}, {}
 
 Commands.WalkSpeed = {Name = "WalkSpeed", Aliases = {"Speed"}, RequiresArgs = true, Description = "sets walkspeed to given value", Function = function(Value)
     local Humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -501,39 +502,6 @@ Commands.JobId = {Name = "JobId", Aliases = nil, RequiresArgs = false, Descripti
     rconsoleprint("\n" .. tostring(game.JobId) .. "\n")
 end}
 
-Commands.Rejoin = {Name = "Rejoin", Aliases = {"RJ"}, RequiresArgs = false, Description = "rejoins the game", Function = function()
-    Services.TeleportService:Teleport(game.PlaceId, LocalPlayer)
-end}
-
-Commands.AutoRejoin = {Name = "AutoRejoin", Aliases = {"AutoRJ"}, RequiresArgs = false, Description = "automatically rejoins server if you get kicked or disconnected", Function = function()
-    local PromptOverlay = Services.CoreGui..RobloxPromptGui.promptOverlay
-    PromptOverlay.ChildAdded:Connect(function(Child)
-        if Child.Name == "ErrorPrompt" then
-            RunCommand(Commands.Rejoin)
-        end
-    end)
-end}
-
-Commands.ServerHop = {Name = "ServerHop", Aliases = {"SHop"}, RequiresArgs = false, Description = "teleports you to a different server", Function = function()
-    local ServerList = {}
-
-    for _, Server in next, Services.HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")).data do
-        if type(Server) == "table" and Server.maxPlayers > Server.playing and Server.id ~= game.JobId then
-            table.insert(ServerList, Server)
-        end
-    end
-
-    if #ServerList > 0 then
-        Services.TeleportService:TeleportToPlaceInstance(game.PlaceId, ServerList[math.random(#ServerList)])
-    else
-        rconsoleprint("\ncouldn't find a server\n")
-    end
-end}
-
-Commands.GameTeleport = {Name = "GameTeleport", Aliases = {"GameTP"}, RequiresArgs = true, Description = "joins a game by id", Function = function(PlaceId)
-    Services.TeleportService:Teleport(PlaceId)
-end}
-
 Commands.AntiIdle = {Name = "AntiIdle", Aliases = {"AntiAfk"}, RequiresArgs = false, Description = "prevents game from kicking you for being idle/afk", Function = function()
     local GC = getconnections or get_signal_cons; if GC then
         for _, Connection in next, GC(LocalPlayer.Idled) do
@@ -583,6 +551,14 @@ Commands.ShowPrompts = {Name = "ShowPrompts", Aliases = {"ShowPurchasePrompts"},
     Services.CoreGui.PurchasePrompt.Enabled = true
 end}
 
+Commands.SaveGame = {Name = "SaveGame", Aliases = {"SavePlace", "SaveInstance"}, RequiresArgs = false, Description = "saves the game to workspace folder", Function = function()
+    if getsynasset() then
+        saveinstance()
+    else
+        saveinstance(game)
+    end
+end}
+
 Commands.Enable = {Name = "Enable", Alises = nil, RequiresArgs = true, Description = "toggles visibility of coregui items", Function = function(Item)
     if Item:lower() == "inventory" or Item:lower() == "backpack" then
         Services.StarterGui:SetCoreGuiEnabled("Backpack", true)
@@ -606,6 +582,388 @@ Commands.Disable = {Name = "Disable", Aliases = nil, RequiresArgs = true, Descri
         Services.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
     end
 end, IgnoreSpecialPlayerCases = true}
+
+CommandStorage.ShownGuiObjects = {} do
+    Commands.ShowGuis = {Name = "ShowGuis", Aliases = nil, RequiresArgs = false, Description = "shows any invisible guis", Function = function()
+        for _, Descendant in next, LocalPlayer:FindFirstChildOfClass("PlayerGui"):GetDescendants() do
+            if (Descendant:IsA("Frame") or Descendant:IsA("ImageLabel") or Descendant:IsA("ScrollingFrame")) and not Descendant.Visible then
+                Descendant.Visible = true
+                if not table.find(CommandStorage.ShownGuiObjects, Descendant) then
+                    table.insert(CommandStorage.ShownGuiObjects, Descendant)
+                end
+            end
+        end
+    end}
+
+    Commands.UnshowGuis = {Name = "UnshowGuis", Aliases = nil, RequiresArgs = false, Description = "undoes showguis", Function = function()
+        for _, GuiObject in next, CommandStorage.ShownGuiObjects do
+            GuiObject.Visible = false
+        end
+        CommandStorage.ShownGuiObjects = {}
+    end}
+end
+
+CommandStorage.HiddenGuiObjects = {} do
+    Commands.HideGuis = {Name = "HideGuis", Aliases = nil, RequiresArgs = false, Description = "hides any guis in PlayerGui", Function = function()
+        for _, Descendant in next, LocalPlayer:FindFirstChildOfClass("PlayerGui"):GetDescendants() do
+            if (Descendant:IsA("Frame") or Descendant:IsA("ImageLabel") or Descendant:IsA("ScrollingFrame")) and Descendant.Visible then
+                Descendant.Visible = false
+
+                if not table.find(HiddenGuiObjects, Descendant) then
+                    table.insert(HiddenGuiObjects, Descendant)
+                end
+            end
+        end
+    end}
+    
+    Commands.UnhideGuis = {Name = "UnhideGuis", Aliases = nil, RequiresArgs = false, Description = "undoes hideguis", Function = function()
+        for _, GuiObject in next, HiddenGuiObjects do
+            GuiObject.Visible = true
+        end
+        HiddenGuiObjects = {}
+    end}
+end
+
+local function DeleteGuiAtPosition(PositionX, PositionY)
+    pcall(function()
+        for _, Gui in next, LocalPlayer:FindFirstChildOfClass("PlayerGui"):GetGuiObjectsAtPosition(PositionX, PositionY) do
+            if Gui.Visible == true then
+                Gui:Destroy()
+            end
+        end
+    end)
+end
+
+local DeleteGuiInputConnection; do
+    Commands.GuiDelete = {Name = "GuiDelete", Aliases = nil, RequiresArgs = false, Description = "backspace to delete gui", Function = function()
+        DeleteGuiInputConnection = Services.UserInputService.InputBegan:Connect(function(Input, GameProcessedEvent)
+            if not GameProcessedEvent and Input.KeyCode == Enum.KeyCode.Backspace then
+                DeleteGuiAtPosition(Mouse.X, Mouse.Y)
+            end
+        end)
+    end}
+
+    Commands.UnGuiDelete = {Name = "UnGuiDelete", Aliases = nil, RequiresArgs = false, Description = "disables guidelete", Function = function()
+        if DeleteGuiInputConnection then
+            DeleteGuiInputConnection:Disconnect()
+        end
+    end}
+end
+
+Commands.ClearError = {Name = "ClearError", Aliases = {"ClearErrors"}, RequiresArgs = false, Description = "clears box and blur when kicked/disconnected", Function = function()
+    Services.GuiService:ClearError()
+end}
+
+Commands.ClientAntiKick = {Name = "ClientAntiKick", Aliases = {"AntiClientKick", "AntiKick"}, RequiresArgs = false, Description = "prevents client kicks", Function = function()
+    local __namecall; __namecall = hookmetamethod(game, "__namecall", newcclosure(function(Self, ...)
+        if not checkcaller() and getnamecallmethod() == "Kick" then
+            return
+        end
+
+        return __namecall(Self, ...)
+    end))
+
+    local __index; __index = hookmetamethod(game, "__index", newcclosure(function(Self, Key)
+        if not checkcaller() and tostring(Self) == tostring(LocalPlayer) and Key == "Kick" then
+            return
+        end
+
+        return __index(Self, Key)
+    end))
+
+    hookfunction(LocalPlayer.Kick, function() end)
+end}
+
+Commands.AntiClientTeleport = {Name = "AntiClientTeleport", Aliases = {"AntiTeleport"}, RequiresArgs = false, Description = "prevents client teleports", Function = function()
+    local OldTeleport; OldTeleport = hookfunction(Services.TeleportService.Teleport, function()
+        return
+    end)
+
+    local OldTeleportToPlaceInstance = hookfunction(Services.TeleportService.TeleportToPlaceInstance, function()
+        return
+    end)
+end}
+
+Commands.CancelTeleport = {Name = "CancelTeleport", Aliases = {"CancelTP"}, RequiresArgs = false, Description = "cancels teleport in progress", Function = function()
+    Services.TeleportService:TeleportCancel()
+end}
+
+Commands.Volume = {Name = "Volume", Aliases = {"Vol"}, RequiresArgs = true, Description = "adjusts your game volume on a scale of 0 to 10", Function = function(Level)
+    UserSettings():GetService("UserGameSettings").MasterVolume = Level/10
+end}
+
+Commands.AntiLag = {Name = "AntiLag", Aliases = {"BoostFPS", "LowGraphics"}, RequiresArgs = false, Description = "lowers game quality to boost fps", Function = function()
+    local Terrain = Services.Workspace:FindFirstChildOfClass("Terrain")
+    Terrain.WaterWaveSize = 0
+    Terrain.WaterWaveSpeed = 0
+    Terrain.WaterReflectance = 0
+    Terrain.WaterTransparency = 0
+    
+    local Lighting = Services.Lighting
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 9e9
+    
+    settings().Rendering.QualityLevel = 1
+
+    for _, Descendant in next, game:GetDescendants() do
+        if Descendant:IsA("Part") or Descendant:IsA("UnionOperation") or Descendant:IsA("MeshPart") or Descendant:IsA("CornerWedgePart") or Descendant:IsA("TrussPart") then
+            Descendant.Material = Enum.Material.Plastic
+            Descendant.Reflectance = 0
+        elseif Descendant:IsA("Decal") then
+            Descendant.Transparency = 1
+        elseif Descendant:IsA("ParticleEmitter") or Descendant:IsA("Trail") then
+            Descendant.LifeTime = NumberRange.new(0)
+        elseif Descendant:IsA("Explosion") then
+            Descendant.BlastPressure = 1
+            Descendant.BlastRadius = 1
+        end
+    end
+
+    for _, Descendant in next, Lighting:GetDescendants() do
+        if Descendant:IsA("BlurEffect") or Descendant:IsA("SunRaysEffect") or Descendant:IsA("ColorCorrectionEffect") or Descendant:IsA("BloomEffect") or Descendant:IsA("DepthOfFieldEffect") then
+		    Descendant.Enabled = false
+		end
+    end
+
+	Services.Workspace.DescendantAdded:Connect(function(Descendant)
+		coroutine.wrap(function()
+            if Descendant:IsA("ForceField") or Descendant:IsA("Sparkles") or Descendant:IsA("Smoke") or Descendant:IsA("Fire") then
+                Services.RunService.HeartBeat:Wait()
+                Descendant:Destroy()
+            end
+		end)()
+	end)
+end}
+
+Commands.Record = {Name = "Record", Aliases = {"Rec"}, RequiresArgs = false, Description = "toggles roblox recorder", Function = function()
+    Services.CoreGui:ToggleRecording()
+end}
+
+Commands.ScreenShot = {Name = "Screenshot", Aliases = {"SS"}, RequiresArgs = false, Description = "takes a screenshot", Function = function()
+    Services.CoreGui:TakeScreenshot()
+end}
+
+Commands.ToggleFullscreen = {Name = "ToggleFullscreen", Aliases = {"togglefs"}, RequiresArgs = false, Description = "toggles fullscreen", Function = function()
+    Services.GuiService:ToggleFullscreen()
+end}
+
+Commands.Exit = {Name = "Exit", Aliases = nil, RequiresArgs = false, Description = "kills roblox process", Function = function()
+    game:Shutdown()
+end}
+
+local Clip, Noclipping = false; do
+    Commands.Noclip = {Name = "Noclip", Aliases = nil, RequiresArgs = false, Description = "go through objects", Function = function()
+        Clip = false
+    
+        task.wait(0.1)
+    
+        local function NoclipLoop()
+            if not Clip and LocalPlayer.Character then
+                for _, Descendant in next, LocalPlayer.Character:GetDescendants() do
+                    if Descendant:IsA("BasePart") and Descendant.CanCollide and Descendant.Name then
+                        Descendant.CanCollide = false
+                    end
+                end
+            end
+        end
+    
+        Noclipping = Services.RunService.Stepped:Connect(NoclipLoop)
+    end}
+
+    Commands.Clip = {Name = "Clip", Aliases = {"UnnoClip"}, RequiresArgs = false, Description = "disables noclip", Function = function()
+        if Noclipping then
+            Noclipping:Disconnect()
+        end
+
+        Clip = true
+    end}
+
+    Commands.ToggleNoclip = {Name = "ToggleNoclip", Aliases = nil, RequiresArgs = false, Description = "toggles noclip", Function = function()
+        if Clip then
+            RunCommand(Commands.Noclip)
+        else
+            RunCommand(Commands.Clip)
+        end
+    end}
+end
+
+CommandStorage.Flying, CommandStorage.QEFly, CommandStorage.FlySpeed, CommandStorage.VehicleFlySpeed,CommandStorage.FlyKeyDown, CommandStorage.FlyKeyUp = false, true, 1, 1
+
+local function SFly(VFly)
+    repeat task.wait() until LocalPlayer and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    repeat task.wait() until Mouse
+
+    if CommandStorage.FlyKeyDown then
+        CommandStorage.FlyKeyDown:Disconnect()
+    end
+    if CommandStorage.FlyKeyup then
+        CommandStorage.FlyKeyUp:Disconnect()
+    end
+
+    local HumanoidRootPart = LocalPlayer.Character.HumanoidRootPart
+    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local SPEED = 0
+
+    local function FLY()
+        CommandStorage.Flying = true
+        local BodyGyro = Instance.new('BodyGyro')
+		local BodyVelocity = Instance.new('BodyVelocity')
+		BodyGyro.P = 9e4
+		BodyGyro.Parent = HumanoidRootPart
+		BodyVelocity.Parent = HumanoidRootPart
+		BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+		BodyGyro.CFrame = HumanoidRootPart.CFrame
+		BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+		BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+
+        task.spawn(function()
+            repeat task.wait()
+                if not VFly and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                    LocalPlayer.Character.Humanoid.PlatformStand = true
+                end
+
+                if CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0 then
+                    SPEED = 50
+                elseif not (CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0) and SPEED ~= 0 then
+                    SPEED = 0
+                end
+
+                if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
+					BodyVelocity.Velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (CONTROL.F + CONTROL.B)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - workspace.CurrentCamera.CoordinateFrame.p)) * SPEED
+					lCONTROL = {F = CONTROL.F, B = CONTROL.B, L = CONTROL.L, R = CONTROL.R}
+				elseif (CONTROL.L + CONTROL.R) == 0 and (CONTROL.F + CONTROL.B) == 0 and (CONTROL.Q + CONTROL.E) == 0 and SPEED ~= 0 then
+					BodyVelocity.Velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (lCONTROL.F + lCONTROL.B)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(lCONTROL.L + lCONTROL.R, (lCONTROL.F + lCONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - workspace.CurrentCamera.CoordinateFrame.p)) * SPEED
+				else
+					BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+				end
+
+                BodyGyro.CFrame = workspace.CurrentCamera.CoordinateFrame
+            until not CommandStorage.Flying
+
+            CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            SPEED = 0
+            BodyGyro:Destroy()
+            BodyVelocity:Destroy()
+
+            if LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                LocalPlayer.Character:FindFirstChildOfClass("Humanoid").PlatformStand = false
+            end
+        end)
+    end
+
+    CommandStorage.FlyKeyDown = Services.UserInputService.InputBegan:Connect(function(Input, GameProcessedEvent)
+        if not GameProcessedEvent then
+            if Input.KeyCode == Enum.KeyCode.W then
+                CONTROL.F = (VFly and CommandStorage.VehicleFlySpeed or CommandStorage.FlySpeed)
+            elseif Input.KeyCode == Enum.KeyCode.S then
+                CONTROL.B = -(VFly and CommandStorage.VehicleFlySpeed or CommandStorage.FlySpeed)
+            elseif Input.KeyCode == Enum.KeyCode.A then
+                CONTROL.L = -(VFly and CommandStorage.VehicleFlySpeed or CommandStorage.FlySpeed)
+            elseif Input.KeyCode == Enum.KeyCode.D then 
+                CONTROL.R = (VFly and CommandStorage.VehicleFlySpeed or CommandStorage.FlySpeed)
+            elseif CommandStorage.QEFly and Input.KeyCode == Enum.KeyCode.E then
+                CONTROL.Q = (VFly and CommandStorage.VehicleFlySpeed or CommandStorage.FlySpeed) * 2
+            elseif CommandStorage.QEFly and Input.KeyCode == Enum.KeyCode.Q then
+                CONTROL.E = -(VFly and CommandStorage.VehiclyFlySpeed or CommandStorage.FlySpeed) * 2
+            end
+
+            pcall(function()
+                Services.Workspace.CurrentCamera.CameraType = Enum.CameraType.Track
+            end)
+        end
+    end)
+
+    CommandStorage.FlyKeyDown = Services.UserInputService.InputEnded:Connect(function(Input, GameProcessedEvent)
+        if not GameProcessedEvent then
+            if Input.KeyCode == Enum.KeyCode.W then
+                CONTROL.F = 0
+            elseif Input.KeyCode == Enum.KeyCode.S then
+                CONTROL.B = 0
+            elseif Input.KeyCode == Enum.KeyCode.A then
+                CONTROL.L = 0
+            elseif Input.KeyCode == Enum.KeyCode.D then
+                CONTROL.R = 0
+            elseif Input.KeyCode == Enum.KeyCode.E then
+                CONTROL.Q = 0
+            elseif Input.KeyCode == Enum.KeyCode.Q then
+                CONTROL.E = 0
+            end
+        end
+    end)
+
+    FLY()
+end
+
+local function NOFLY()
+    CommandStorage.Flying = false
+
+    if CommandStorage.FlyKeyDown then
+        CommandStorage.FlyKeyDown:Disconnect()
+    end
+    if CommandStorage.FlyKeyup then
+        CommandStorage.FlyKeyUp:Disconnect()
+    end
+
+    if LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+        LocalPlayer.Character.Humanoid.PlatformStand = false
+    end
+
+    pcall(function()
+        Services.Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+    end)
+end
+
+Commands.Fly = {Name = "Fly", Aliases = nil, RequiresArgs = false, Description = "makes you fly", Function = function(Speed)
+    NOFLY()
+    task.wait()
+    SFly()
+
+    if Speed and tonumber(Speed) then
+        CommandStorage.FlySpeed = tonumber(Speed)
+    end
+end}
+
+Commands.FlySpeed = {Name = "FlySpeed", Aliases = {"FlySp"}, RequiresArgs = true, Description = "set fly speed", Function = function(Speed)
+    if not Speed then
+        Speed = 1
+    end
+
+    CommandStorage.FlySpeed = tonumber(Speed)
+end}
+
+Commands.Unfly = {Name = "Unfly", Aliases = {"Nofly", "Novfly", "UnvehicleFly", "Unvfly"}, RequiresArgs = false, Description = "disables fly", Function = function()
+    NOFLY()
+end}
+
+Commands.VFly = {Name = "VFly", Aliases = {"VehicleFly"}, RequiresArgs = false, Description = "makes you fly in a vehicle", Function = function(Speed)
+    NOFLY()
+    task.wait()
+    SFly(true)
+
+    if Speed and tonumber(Speed) then
+        CommandStorage.VehicleFlySpeed = tonumber(Speed)
+    end
+end}
+
+Commands.VFlySpeed = {Name = "VFlySpeed", Aliases = {"VehicleFlySpeed"}, RequiresArgs = true, Description = "sets vehicle fly speed", Function = function(Speed)
+    if not Speed then
+        Speed = 1 
+    end
+
+    if tonumber(Speed) then
+        CommandStorage.VehicleFlySpeed = tonumber(Speed)
+    end
+end}
+
+Commands.QEFly = {Name = "QEFly", Aliases = {"FlyQE"}, RequiresArgs = false, Description = "enables or disables q and e hotkeys for fly", Function = function(Value)
+    if Value == "false" then
+        CommandStorage.QEFly = false
+    elseif Value == "true" then
+        CommandStorage.QEFly = true
+    end
+end}
 
 local SpecialPlayerCases = {
     all = function()
